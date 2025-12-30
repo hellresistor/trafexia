@@ -160,6 +160,7 @@ export const IPC_CHANNELS = {
 
   // Browser/Emulator
   LAUNCH_BROWSER: 'app:launch-browser',
+  LAUNCH_EMULATOR: 'app:launch-emulator',
 } as const;
 
 // ===== IPC Handler Types =====
@@ -190,6 +191,7 @@ export interface IpcApi {
 
   // Browser/Emulator
   launchBrowser: (browser: 'chrome' | 'firefox' | 'edge') => Promise<boolean>;
+  launchEmulator: () => Promise<boolean>;
 
   // Events
   onRequestCaptured: (callback: (request: CapturedRequest) => void) => () => void;

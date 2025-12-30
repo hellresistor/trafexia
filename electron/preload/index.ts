@@ -69,6 +69,9 @@ const api: IpcApi = {
   launchBrowser: (browser: 'chrome' | 'firefox' | 'edge'): Promise<boolean> => {
     return ipcRenderer.invoke(IPC_CHANNELS.LAUNCH_BROWSER, browser);
   },
+  launchEmulator: (): Promise<boolean> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.LAUNCH_EMULATOR);
+  },
 
   // Events
   onRequestCaptured: (callback: (request: CapturedRequest) => void) => {

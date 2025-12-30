@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { Play, Square, Loader2 } from 'lucide-vue-next';
+import { Play, Square, Loader2, Smartphone } from 'lucide-vue-next';
 import { useProxyStore } from '@/stores/proxyStore';
 
 const proxyStore = useProxyStore();
@@ -26,6 +26,15 @@ async function toggleProxy() {
     await proxyStore.startProxy();
   }
 }
+
+async function launchEmulator() {
+  try {
+    await window.electronAPI.launchEmulator();
+  } catch (error) {
+    console.error('Failed to launch emulator:', error);
+    alert('Không thể khởi chạy máy ảo Android. Vui lòng đảm bảo Android SDK đã được cài đặt.');
+  }
+}
 </script>
 
 <template>
@@ -38,6 +47,13 @@ async function toggleProxy() {
       <Play v-else-if="!proxyStore.isRunning" class="w-4 h-4" />
       <Square v-else class="w-4 h-4" />
       <span>{{ proxyStore.isRunning ? 'Stop' : 'Start' }}</span>
+    </button>
+
+    <!-- Emulator Button -->
+    <button class="emulator-button" @click="launchEmulator" :disabled="!proxyStore.isRunning"
+      :title="proxyStore.isRunning ? 'Khởi chạy máy ảo Android với proxy' : 'Vui lòng khởi động proxy trước'">
+      <Smartphone class="w-4 h-4" />
+      <span>Android</span>
     </button>
 
     <!-- Status -->
@@ -133,4 +149,34 @@ async function toggleProxy() {
   border-radius: 4px;
   color: #79c0ff;
 }
+
+.emulator-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  height: 32px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.3, 0, 0.5, 1);
+  border: 1px solid rgba(240, 246, 252, 0.1);
+  background: #1f6feb;
+  color: white;
+  box-shadow: 0 1px 0 rgba(27, 31, 36, 0.1);
+}
+
+.emulator-button:hover:not(:disabled) {
+  background: #388bfd;
+}
+
+.emulator-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background: #21262d;
+  color: #6e7681;
+  border-color: rgba(240, 246, 252, 0.1);
+}
+
 </style>
