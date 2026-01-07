@@ -10,6 +10,7 @@ on:
 jobs:
   build:
     strategy:
+      fail-fast: false # Continue other builds even if one fails
       matrix:
         include:
           - os: macos-latest
@@ -31,13 +32,27 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
+      # Linux dependencies for native modules and Electron
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libayatana-appindicator3-dev librsvg2-dev
+
+      # Rebuild native modules for the target platform
       - name: Install dependencies
         run: npm ci
+
+      - name: Rebuild native modules
+        run: npm run rebuild 2>/dev/null || npx electron-rebuild -f
+        continue-on-error: true
 
       - name: Build Electron app
         run: npm run build:${{ matrix.platform }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Disable code signing for CI builds
+          CSC_IDENTITY_AUTO_DISCOVERY: false
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -49,6 +64,7 @@ jobs:
             release/*.exe
             release/*.AppImage
             release/*.deb
+            release/*-portable.exe
           if-no-files-found: ignore
 
   release:
@@ -62,6 +78,9 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
+
+      - name: List artifacts
+        run: ls -la artifacts/ || echo "No artifacts found"
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
