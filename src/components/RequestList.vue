@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed, onMounted, onUnmounted } from 'vue';
+import { ref, watch } from 'vue';
 import { useTrafficStore } from '@/stores/trafficStore';
 import { formatTimestamp, formatBytes, formatDuration, getStatusClass, truncateUrl } from '@/utils/formatters';
 import type { CapturedRequest } from '@shared/types';
@@ -37,59 +37,6 @@ function getRowClass(data: CapturedRequest) {
   return classes.join(' ');
 }
 
-function handleKeyDown(event: KeyboardEvent) {
-  if (trafficStore.filteredRequests.length === 0) return;
-  
-  const currentIndex = selectedRow.value 
-    ? trafficStore.filteredRequests.findIndex(r => r.id === selectedRow.value!.id)
-    : -1;
-
-  if (event.key === 'ArrowDown') {
-    event.preventDefault();
-    const nextIndex = currentIndex < trafficStore.filteredRequests.length - 1 
-      ? currentIndex + 1 
-      : currentIndex;
-    
-    if (nextIndex >= 0) {
-      trafficStore.setSelectedRequest(trafficStore.filteredRequests[nextIndex]);
-      scrollToRow(nextIndex);
-    }
-  } else if (event.key === 'ArrowUp') {
-    event.preventDefault();
-    const prevIndex = currentIndex > 0 
-      ? currentIndex - 1 
-      : 0;
-    
-    if (prevIndex >= 0) {
-      trafficStore.setSelectedRequest(trafficStore.filteredRequests[prevIndex]);
-      scrollToRow(prevIndex);
-    }
-  }
-}
-
-function scrollToRow(index: number) {
-  // Wait for DOM update
-  setTimeout(() => {
-    const tableBody = document.querySelector('.request-datatable .p-datatable-tbody');
-    if (tableBody) {
-      const rows = tableBody.querySelectorAll('tr');
-      if (rows[index]) {
-        rows[index].scrollIntoView({ 
-          behavior: 'smooth', 
-          block: 'nearest' 
-        });
-      }
-    }
-  }, 50);
-}
-
-onMounted(() => {
-  window.addEventListener('keydown', handleKeyDown);
-});
-
-onUnmounted(() => {
-  window.removeEventListener('keydown', handleKeyDown);
-});
 </script>
 
 <template>
@@ -111,45 +58,59 @@ onUnmounted(() => {
 
     <!-- Request Table -->
     <div v-else class="table-container">
-      <DataTable 
-        :value="trafficStore.filteredRequests" 
-        v-model:filters="filters"
-        :selection="selectedRow"
-        @row-click="onRowClick"
-        :rowClass="getRowClass"
-        filterDisplay="row"
-        :globalFilterFields="['method', 'host', 'path', 'status']"
-        :reorderableColumns="true"
-        :resizableColumns="true"
-        columnResizeMode="expand"
-        showGridlines
-        stripedRows
-		:virtualScrollerOptions="{
-			itemSize: 38,
-			delay: 0,
-			showLoader: false
-		}"
-        size="small"
-        scrollable
-        scrollHeight="flex"
-        sortMode="multiple"
-        removableSort
-        class="request-datatable"
-      >
+		<DataTable 
+			dataKey="id"
+			:value="trafficStore.filteredRequests"
+			selectionMode="single" 
+			v-model:filters="filters"
+			v-model:selection="selectedRow"
+			@row-click="onRowClick"
+			:rowClass="getRowClass"
+			filterDisplay="row"
+			:globalFilterFields="['method', 'host', 'path', 'status']"
+			:reorderableColumns="true"
+			:resizableColumns="true"
+			columnResizeMode="expand"
+			showGridlines
+			stripedRows
+			:virtualScrollerOptions="{
+				itemSize: 38,
+				delay: 0,
+				showLoader: false
+			}"
+			size="small"
+			scrollable
+			scrollHeight="flex"
+			sortMode="multiple"
+			removableSort
+			class="request-datatable"
+		>
         <template #header>
-					<div class="flex justify-end">
-						<IconField iconPosition="left">
-							<InputIcon>
-								<i class="pi pi-search" />
-							</InputIcon>
-							<InputText v-model="filters['global'].value" placeholder="Keyword Search" />
-						</IconField>
-					</div>
-				</template>
+			<div class="flex justify-end">
+				<IconField iconPosition="left">
+					<InputIcon>
+						<i class="pi pi-search" />
+					</InputIcon>
+					<InputText v-model="filters['global'].value" placeholder="Keyword Search" />
+				</IconField>
+			</div>
+		</template>
 
         <template #empty> 
           <div class="text-center">No requests found.</div>
         </template>
+
+		<!-- thêm cột id -->
+		<Column 
+		  field="id" 
+		  header="ID" 
+		  :sortable="true"
+		  :style="{ width: '80px' }"
+		>
+		  <template #body="{ data }">
+			<span class="id-cell">{{ data.id }}</span>
+		  </template>
+		</Column>
 
         <Column 
           field="timestamp" 
