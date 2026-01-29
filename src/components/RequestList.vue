@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue';
+import { ref, watch, computed, onMounted, onUnmounted } from 'vue';
 import { useTrafficStore } from '@/stores/trafficStore';
 import { formatTimestamp, formatBytes, formatDuration, getStatusClass, truncateUrl } from '@/utils/formatters';
 import type { CapturedRequest } from '@shared/types';
@@ -36,6 +36,60 @@ function getRowClass(data: CapturedRequest) {
   if (data.status >= 400) classes.push('error-row');
   return classes.join(' ');
 }
+
+function handleKeyDown(event: KeyboardEvent) {
+  if (trafficStore.filteredRequests.length === 0) return;
+  
+  const currentIndex = selectedRow.value 
+    ? trafficStore.filteredRequests.findIndex(r => r.id === selectedRow.value!.id)
+    : -1;
+
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    const nextIndex = currentIndex < trafficStore.filteredRequests.length - 1 
+      ? currentIndex + 1 
+      : currentIndex;
+    
+    if (nextIndex >= 0) {
+      trafficStore.setSelectedRequest(trafficStore.filteredRequests[nextIndex]);
+      scrollToRow(nextIndex);
+    }
+  } else if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    const prevIndex = currentIndex > 0 
+      ? currentIndex - 1 
+      : 0;
+    
+    if (prevIndex >= 0) {
+      trafficStore.setSelectedRequest(trafficStore.filteredRequests[prevIndex]);
+      scrollToRow(prevIndex);
+    }
+  }
+}
+
+function scrollToRow(index: number) {
+  // Wait for DOM update
+  setTimeout(() => {
+    const tableBody = document.querySelector('.request-datatable .p-datatable-tbody');
+    if (tableBody) {
+      const rows = tableBody.querySelectorAll('tr');
+      if (rows[index]) {
+        rows[index].scrollIntoView({ 
+          behavior: 'smooth', 
+          block: 'nearest' 
+        });
+      }
+    }
+  }, 50);
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', handleKeyDown);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeyDown);
+});
 </script>
 
 <template>
@@ -70,6 +124,11 @@ function getRowClass(data: CapturedRequest) {
         columnResizeMode="expand"
         showGridlines
         stripedRows
+		:virtualScrollerOptions="{
+			itemSize: 38,
+			delay: 0,
+			showLoader: false
+		}"
         size="small"
         scrollable
         scrollHeight="flex"
@@ -129,7 +188,7 @@ function getRowClass(data: CapturedRequest) {
           header="Host" 
           :sortable="true"
           :showFilterMatchModes="true"
-          :style="{ maxWidth: '100px' }"
+          :style="{ maxWidth: '150px' }"
         >
           <template #body="{ data }">
             <span :title="data.host">{{ data.host }}</span>
@@ -150,7 +209,7 @@ function getRowClass(data: CapturedRequest) {
           header="Path" 
           :sortable="true"
           :showFilterMatchModes="true"
-          :style="{ maxWidth: '100px' }"
+          :style="{ maxWidth: '150px' }"
         >
           <template #body="{ data }">
             <span class="path-cell" :title="data.path">{{ data.path }}</span>
