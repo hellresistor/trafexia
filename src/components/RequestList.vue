@@ -1,25 +1,39 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { ref, watch, computed } from 'vue';
 import { useTrafficStore } from '@/stores/trafficStore';
 import { formatTimestamp, formatBytes, formatDuration, getStatusClass, truncateUrl } from '@/utils/formatters';
 import type { CapturedRequest } from '@shared/types';
+import DataTable from 'primevue/datatable';
+import Column from 'primevue/column';
+import InputText from 'primevue/inputtext';
+import IconField from 'primevue/iconfield';
+import InputIcon from 'primevue/inputicon';
+import { FilterMatchMode } from 'primevue/api';
 
 const trafficStore = useTrafficStore();
 const selectedRow = ref<CapturedRequest | null>(null);
+
+const filters = ref({
+  global: { value: null, matchMode: FilterMatchMode.CONTAINS },
+  method: { value: null, matchMode: FilterMatchMode.CONTAINS },
+  host: { value: null, matchMode: FilterMatchMode.CONTAINS },
+  path: { value: null, matchMode: FilterMatchMode.CONTAINS },
+  status: { value: null, matchMode: FilterMatchMode.EQUALS },
+});
 
 watch(() => trafficStore.selectedRequest, (newVal) => {
   selectedRow.value = newVal;
 });
 
-function onRowClick(request: CapturedRequest) {
-  trafficStore.setSelectedRequest(request);
+function onRowClick(event: any) {
+  trafficStore.setSelectedRequest(event.data);
 }
 
 function getRowClass(data: CapturedRequest) {
   const classes = [];
-  if (selectedRow.value?.id === data.id) classes.push('selected');
-  if (data.status === 0) classes.push('pending');
-  if (data.status >= 400) classes.push('error');
+  if (selectedRow.value?.id === data.id) classes.push('selected-row');
+  if (data.status === 0) classes.push('pending-row');
+  if (data.status >= 400) classes.push('error-row');
   return classes.join(' ');
 }
 </script>
@@ -43,42 +57,161 @@ function getRowClass(data: CapturedRequest) {
 
     <!-- Request Table -->
     <div v-else class="table-container">
-      <table class="request-table">
-        <thead>
-          <tr>
-            <th class="col-time">Time</th>
-            <th class="col-method">Method</th>
-            <th class="col-host">Host</th>
-            <th class="col-path">Path</th>
-            <th class="col-status">Status</th>
-            <th class="col-duration">Duration</th>
-            <th class="col-size">Size</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="request in trafficStore.filteredRequests" :key="request.id" :class="getRowClass(request)"
-            @click="onRowClick(request)" style="cursor: pointer;">
-            <td class="col-time">{{ formatTimestamp(request.timestamp) }}</td>
-            <td class="col-method">
-              <span :class="['method-badge', request.method]">{{ request.method }}</span>
-            </td>
-            <td class="col-host" :title="request.host">{{ request.host }}</td>
-            <td class="col-path" :title="request.path">{{ truncateUrl(request.path, 50) }}</td>
-            <td class="col-status">
-              <span v-if="request.status === 0" class="status-badge status-0">•••</span>
-              <span v-else :class="['status-badge', getStatusClass(request.status)]">
-                {{ request.status }}
-              </span>
-            </td>
-            <td class="col-duration">
-              {{ request.duration > 0 ? formatDuration(request.duration) : '—' }}
-            </td>
-            <td class="col-size">
-              {{ request.size > 0 ? formatBytes(request.size) : '—' }}
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <DataTable 
+        :value="trafficStore.filteredRequests" 
+        v-model:filters="filters"
+        :selection="selectedRow"
+        @row-click="onRowClick"
+        :rowClass="getRowClass"
+        filterDisplay="row"
+        :globalFilterFields="['method', 'host', 'path', 'status']"
+        :reorderableColumns="true"
+        :resizableColumns="true"
+        columnResizeMode="expand"
+        showGridlines
+        stripedRows
+        size="small"
+        scrollable
+        scrollHeight="flex"
+        sortMode="multiple"
+        removableSort
+        class="request-datatable"
+      >
+        <template #header>
+					<div class="flex justify-end">
+						<IconField iconPosition="left">
+							<InputIcon>
+								<i class="pi pi-search" />
+							</InputIcon>
+							<InputText v-model="filters['global'].value" placeholder="Keyword Search" />
+						</IconField>
+					</div>
+				</template>
+
+        <template #empty> 
+          <div class="text-center">No requests found.</div>
+        </template>
+
+        <Column 
+          field="timestamp" 
+          header="Time" 
+          :sortable="true"
+          :style="{ width: '100px' }"
+        >
+          <template #body="{ data }">
+            <span class="time-cell">{{ formatTimestamp(data.timestamp) }}</span>
+          </template>
+        </Column>
+
+        <Column 
+          field="method" 
+          header="Method" 
+          :sortable="true"
+					:showFilterMenu="false"
+          :style="{ width: '100px' }"
+        >
+          <template #body="{ data }">
+            <span :class="['method-badge', data.method]">{{ data.method }}</span>
+          </template>
+          <template #filter="{ filterModel, filterCallback }">
+            <InputText 
+              v-model="filterModel.value" 
+              type="text" 
+              @input="filterCallback()" 
+              class="p-column-filter"
+              placeholder="Search method"
+            />
+          </template>
+        </Column>
+
+        <Column 
+          field="host" 
+          header="Host" 
+          :sortable="true"
+          :showFilterMatchModes="true"
+          :style="{ maxWidth: '100px' }"
+        >
+          <template #body="{ data }">
+            <span :title="data.host">{{ data.host }}</span>
+          </template>
+          <template #filter="{ filterModel, filterCallback }">
+            <InputText 
+              v-model="filterModel.value" 
+              type="text" 
+              @input="filterCallback()" 
+              class="p-column-filter"
+              placeholder="Search host"
+            />
+          </template>
+        </Column>
+
+        <Column 
+          field="path" 
+          header="Path" 
+          :sortable="true"
+          :showFilterMatchModes="true"
+          :style="{ maxWidth: '100px' }"
+        >
+          <template #body="{ data }">
+            <span class="path-cell" :title="data.path">{{ data.path }}</span>
+          </template>
+          <template #filter="{ filterModel, filterCallback }">
+            <InputText 
+              v-model="filterModel.value" 
+              type="text" 
+              @input="filterCallback()" 
+              class="p-column-filter"
+              placeholder="Search path"
+            />
+          </template>
+        </Column>
+
+        <Column 
+          field="status" 
+          header="Status" 
+          :sortable="true"
+          :showFilterMenu="false"
+          :style="{ width: '100px' }"
+        >
+          <template #body="{ data }">
+            <span v-if="data.status === 0" class="status-badge status-0">•••</span>
+            <span v-else :class="['status-badge', getStatusClass(data.status)]">
+              {{ data.status }}
+            </span>
+          </template>
+          <template #filter="{ filterModel, filterCallback }">
+            <InputText 
+              v-model="filterModel.value" 
+              type="text" 
+              @input="filterCallback()" 
+              class="p-column-filter"
+              placeholder="Status"
+            />
+          </template>
+        </Column>
+
+        <Column 
+          field="duration" 
+          header="Duration" 
+          :sortable="true"
+          :style="{ width: '100px' }"
+        >
+          <template #body="{ data }">
+            {{ data.duration > 0 ? formatDuration(data.duration) : '—' }}
+          </template>
+        </Column>
+
+        <Column 
+          field="size" 
+          header="Size" 
+          :sortable="true"
+          :style="{ width: '100px' }"
+        >
+          <template #body="{ data }">
+            {{ data.size > 0 ? formatBytes(data.size) : '—' }}
+          </template>
+        </Column>
+      </DataTable>
     </div>
   </div>
 </template>
@@ -124,52 +257,54 @@ function getRowClass(data: CapturedRequest) {
 
 .table-container {
   flex: 1;
-  overflow: auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
-.request-table {
-  width: 100%;
-  border-collapse: collapse;
+/* PrimeVue DataTable Customization */
+:deep(.request-datatable) {
+  height: 100%;
   font-size: 13px;
 }
 
-.request-table th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  text-align: left;
-  padding: 10px 12px;
+:deep(.p-datatable-wrapper) {
+  height: 100%;
+}
+
+:deep(.p-datatable-thead > tr > th) {
+  background: var(--color-bg-tertiary) !important;
+  color: var(--color-text-secondary) !important;
   font-weight: 600;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: var(--color-text-secondary);
-  background: var(--color-bg-tertiary);
+  padding: 10px 12px;
   border-bottom: 1px solid var(--color-border);
 }
 
-.request-table tbody tr {
+:deep(.p-datatable-tbody > tr) {
   cursor: pointer;
   transition: background 0.1s;
 }
 
-.request-table tbody tr:hover {
-  background: var(--color-bg-tertiary);
+:deep(.p-datatable-tbody > tr:hover) {
+  background: var(--color-bg-tertiary) !important;
 }
 
-.request-table tbody tr.selected {
-  background: var(--color-accent-muted);
+:deep(.p-datatable-tbody > tr.selected-row) {
+  background: var(--color-accent-muted) !important;
 }
 
-.request-table tbody tr.pending {
+:deep(.p-datatable-tbody > tr.pending-row) {
   opacity: 0.6;
 }
 
-.request-table tbody tr.error td:first-child {
+:deep(.p-datatable-tbody > tr.error-row td:first-child) {
   box-shadow: inset 3px 0 0 var(--color-error);
 }
 
-.request-table td {
+:deep(.p-datatable-tbody > tr > td) {
   padding: 8px 12px;
   border-bottom: 1px solid var(--color-border);
   white-space: nowrap;
@@ -177,39 +312,100 @@ function getRowClass(data: CapturedRequest) {
   text-overflow: ellipsis;
 }
 
-.col-time {
-  width: 75px;
+:deep(.p-column-filter:focus) {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+:deep(.p-icon-field .p-inputtext:not(:first-child), .p-iconfield .p-inputwrapper:not(:first-child) .p-inputtext) {
+	padding-inline-start: calc((var(--p-form-field-padding-x) * 2) + var(--p-icon-size));
+}
+
+/* Custom Cell Styling */
+.time-cell {
   font-family: 'SF Mono', 'Consolas', monospace;
   font-size: 12px;
   color: var(--color-text-muted);
 }
 
-.col-method {
-  width: 75px;
-}
-
-.col-host {
-  width: 180px;
-  max-width: 180px;
-  color: var(--color-text-primary);
-}
-
-.col-path {
-  min-width: 200px;
+.path-cell {
   font-family: 'SF Mono', 'Consolas', monospace;
   font-size: 12px;
   color: var(--color-text-secondary);
 }
 
-.col-status {
-  width: 65px;
+/* Method Badge */
+.method-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
 }
 
-.col-duration,
-.col-size {
-  width: 70px;
-  font-size: 12px;
-  color: var(--color-text-muted);
-  text-align: right;
+.method-badge.GET {
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+}
+
+.method-badge.POST {
+  background: rgba(59, 130, 246, 0.15);
+  color: #3b82f6;
+}
+
+.method-badge.PUT {
+  background: rgba(251, 146, 60, 0.15);
+  color: #fb923c;
+}
+
+.method-badge.PATCH {
+  background: rgba(168, 85, 247, 0.15);
+  color: #a855f7;
+}
+
+.method-badge.DELETE {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.method-badge.OPTIONS,
+.method-badge.HEAD {
+  background: rgba(148, 163, 184, 0.15);
+  color: #94a3b8;
+}
+
+/* Status Badge */
+.status-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.status-badge.status-2xx {
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+}
+
+.status-badge.status-3xx {
+  background: rgba(59, 130, 246, 0.15);
+  color: #3b82f6;
+}
+
+.status-badge.status-4xx {
+  background: rgba(251, 146, 60, 0.15);
+  color: #fb923c;
+}
+
+.status-badge.status-5xx {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.status-badge.status-0 {
+  background: rgba(148, 163, 184, 0.15);
+  color: #94a3b8;
 }
 </style>
