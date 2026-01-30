@@ -37,6 +37,12 @@
   /* Spacing */
   --header-height: 52px;
   --sidebar-width: 280px;
+
+  --p-inputtext-padding-y: 0.5rem;
+  --p-inputtext-padding-x: 0.75rem;
+  --p-icon-size: 1rem;
+  --p-form-field-padding-x: 0.75rem;
+  --p-form-field-padding-y: 0.5rem;
 }
 
 /* Custom scrollbar */
@@ -656,6 +662,8 @@ body {
   border-color: var(--color-border);
   border-radius: 6px;
   color: var(--color-text-primary);
+  padding-block: var(--p-inputtext-padding-y);
+  padding-inline: var(--p-inputtext-padding-x);
 }
 
 .p-inputtext:focus {
@@ -691,4 +699,16 @@ body {
 .hljs {
   background: transparent !important;
   padding: 0 !important;
+}
+
+li.p-column-filter-row-item {
+	padding: 0.5rem 0.75rem;
+}
+
+.p-component {
+	font-size: inherit;
+}
+
+.p-hidden-space {
+	display: none;
 }
