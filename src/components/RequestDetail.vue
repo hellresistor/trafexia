@@ -7,7 +7,8 @@ import {
   ChevronRight,
   X,
   ArrowUpFromLine,
-  ArrowDownFromLine
+  ArrowDownFromLine,
+  RefreshCw
 } from 'lucide-vue-next';
 import { useToast } from 'primevue/usetoast';
 import hljs from 'highlight.js/lib/core';
@@ -118,6 +119,41 @@ function copyResponseBody() {
   }
 }
 
+const isReplaying = ref(false);
+
+async function replayRequest() {
+  if (!request.value || isReplaying.value) return;
+  
+  isReplaying.value = true;
+  try {
+    toast.add({ 
+      severity: 'info', 
+      summary: 'Replaying...', 
+      detail: `${request.value.method} ${request.value.url}`, 
+      life: 2000 
+    });
+    
+    await window.electronAPI.replayRequest(request.value.id);
+    
+    toast.add({ 
+      severity: 'success', 
+      summary: 'Replayed', 
+      detail: 'Request sent successfully', 
+      life: 3000 
+    });
+  } catch (error) {
+    console.error('Failed to replay request:', error);
+    toast.add({ 
+      severity: 'error', 
+      summary: 'Failed', 
+      detail: 'Could not replay request', 
+      life: 3000 
+    });
+  } finally {
+    isReplaying.value = false;
+  }
+}
+
 function close() {
   trafficStore.setSelectedRequest(null);
 }
@@ -140,6 +176,16 @@ function close() {
         :title="request.url">{{ request.url }}</span>
 
       <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
+        <button 
+          class="btn btn-ghost btn-icon" 
+          @click="replayRequest" 
+          :disabled="isReplaying"
+          title="Replay Request">
+          <RefreshCw 
+            style="width: 16px; height: 16px;" 
+            :class="{ 'animate-spin': isReplaying }" />
+        </button>
+        <div style="width: 1px; height: 16px; background: #30363d; margin: 0 4px;"></div>
         <button class="btn btn-ghost btn-icon" @click="copyUrl" title="Copy URL">
           <Copy style="width: 16px; height: 16px;" />
         </button>

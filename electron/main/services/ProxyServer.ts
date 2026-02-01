@@ -7,6 +7,8 @@ import * as tls from 'tls';
 import * as zlib from 'zlib';
 import type { CertificateManager } from './CertificateManager';
 import type { TrafficStorage } from './TrafficStorage';
+import type { BreakpointService } from './BreakpointService';
+import type { MockService } from './MockService';
 import type { CapturedRequest, ProxyConfig, ProxyStatus } from '../../../shared/types';
 import { getLocalIp } from '../utils/network';
 
@@ -15,15 +17,24 @@ export class ProxyServer extends EventEmitter {
   private server: http.Server | null = null;
   private certManager: CertificateManager;
   private storage: TrafficStorage;
+  private breakpointService?: BreakpointService;
+  private mockService?: MockService;
   private config: ProxyConfig | null = null;
   private running = false;
   private certCache: Map<string, { key: string; cert: string }> = new Map();
   private activeSockets: Set<net.Socket | tls.TLSSocket> = new Set();
 
-  constructor(certManager: CertificateManager, storage: TrafficStorage) {
+  constructor(
+    certManager: CertificateManager, 
+    storage: TrafficStorage,
+    breakpointService?: BreakpointService,
+    mockService?: MockService
+  ) {
     super();
     this.certManager = certManager;
     this.storage = storage;
+    this.breakpointService = breakpointService;
+    this.mockService = mockService;
   }
 
   /**
@@ -44,6 +55,11 @@ export class ProxyServer extends EventEmitter {
       // Handle CONNECT method for HTTPS
       this.server.on('connect', (req, clientSocket: net.Socket, head) => {
         this.handleConnect(req, clientSocket, head);
+      });
+      
+      // Handle WebSocket upgrades
+      this.server.on('upgrade', (req, clientSocket: net.Socket, head) => {
+        this.handleWebSocketUpgrade(req, clientSocket, head);
       });
 
       // Handle client errors gracefully (Android disconnects, etc.)
@@ -182,8 +198,80 @@ export class ProxyServer extends EventEmitter {
     const requestBody: Buffer[] = [];
     clientReq.on('data', (chunk) => requestBody.push(chunk));
 
-    clientReq.on('end', () => {
+    clientReq.on('end', async () => {
       const reqBodyStr = Buffer.concat(requestBody).toString('utf-8');
+
+      // Check for mock rules first
+      if (this.mockService) {
+        const mockRule = this.mockService.findMatchingRule(clientReq.method || 'GET', requestUrl);
+        if (mockRule) {
+          console.log('[ProxyServer] Mock rule matched:', mockRule.name);
+          
+          // Apply delay if specified
+          if (mockRule.delay && mockRule.delay > 0) {
+            await new Promise(resolve => setTimeout(resolve, mockRule.delay));
+          }
+
+          const mock = this.mockService.generateMockResponse(mockRule);
+          
+          // Save mocked request
+          const capturedRequest: Omit<CapturedRequest, 'id'> = {
+            timestamp: startTime,
+            method: clientReq.method || 'GET',
+            url: requestUrl,
+            host: parsedUrl.hostname,
+            path: parsedUrl.pathname + parsedUrl.search,
+            status: mock.status,
+            requestHeaders: this.headersToRecord(clientReq.headers),
+            requestBody: reqBodyStr || null,
+            responseHeaders: mock.headers,
+            responseBody: mock.body,
+            contentType: mock.headers['content-type'] || 'text/plain',
+            duration: Date.now() - startTime + (mockRule.delay || 0),
+            size: Buffer.byteLength(mock.body),
+          };
+
+          const requestId = this.storage.saveRequest(capturedRequest);
+          const saved = this.storage.getRequestById(requestId);
+          if (saved) {
+            this.emit('request:complete', saved);
+          }
+
+          // Send mock response to client
+          clientRes.writeHead(mock.status, mock.headers);
+          clientRes.end(mock.body);
+          return;
+        }
+      }
+
+      // Check for breakpoint on request
+      if (this.breakpointService?.shouldBreak('request', clientReq.method || 'GET', requestUrl)) {
+        try {
+          const modified = await this.breakpointService.pauseAtBreakpoint(
+            'request',
+            clientReq.method || 'GET',
+            requestUrl,
+            this.headersToRecord(clientReq.headers),
+            reqBodyStr || null
+          );
+
+          if (modified) {
+            // User modified the request - use modified version
+            options.method = modified.method;
+            options.headers = modified.headers;
+            requestBody.length = 0;
+            if (modified.body) {
+              requestBody.push(Buffer.from(modified.body));
+            }
+          }
+        } catch (error) {
+          // Request dropped by user
+          console.log('[ProxyServer] Request dropped at breakpoint');
+          clientRes.writeHead(499, { 'Content-Type': 'text/plain' });
+          clientRes.end('Request dropped by user');
+          return;
+        }
+      }
 
       // Save request to database
       const capturedRequest: Omit<CapturedRequest, 'id'> = {
@@ -320,7 +408,8 @@ export class ProxyServer extends EventEmitter {
       requestCert: false,
       rejectUnauthorized: false,
       enableTrace: false,
-      // Force HTTP/1.1 to avoid H2 binary framing issues since we don't have H2 parser
+      // Only advertise HTTP/1.1 since we don't have HTTP/2 frame parser
+      // Servers will fallback to HTTP/1.1 which we can properly parse
       ALPNProtocols: ['http/1.1'],
     });
 
@@ -416,6 +505,24 @@ export class ProxyServer extends EventEmitter {
     const outHeaders: Record<string, string> = { ...reqHeaders };
     delete outHeaders['proxy-connection'];
     outHeaders['host'] = hostname;
+
+    // Check for mock rules first
+    if (this.mockService) {
+      const mockRule = this.mockService.findMatchingRule(method, fullUrl);
+      if (mockRule) {
+        console.log('[ProxyServer] Mock rule matched for HTTPS:', mockRule.name);
+        
+        // Apply delay if specified
+        if (mockRule.delay && mockRule.delay > 0) {
+          setTimeout(() => {
+            this.sendMockResponseToHttpsClient(mockRule, startTime, fullUrl, hostname, path, method, reqHeaders, body, clientSocket);
+          }, mockRule.delay);
+        } else {
+          this.sendMockResponseToHttpsClient(mockRule, startTime, fullUrl, hostname, path, method, reqHeaders, body, clientSocket);
+        }
+        return; // Don't make real request
+      }
+    }
 
     // Save request to database
     const capturedRequest: Omit<CapturedRequest, 'id'> = {
@@ -583,6 +690,67 @@ export class ProxyServer extends EventEmitter {
   }
 
   /**
+   * Send mock response to HTTPS client
+   */
+  private sendMockResponseToHttpsClient(
+    mockRule: any,
+    startTime: number,
+    fullUrl: string,
+    hostname: string,
+    path: string,
+    method: string,
+    reqHeaders: Record<string, string>,
+    body: Buffer,
+    clientSocket: tls.TLSSocket
+  ): void {
+    const mock = this.mockService!.generateMockResponse(mockRule);
+    
+    // Save mocked request
+    const capturedRequest: Omit<CapturedRequest, 'id'> = {
+      timestamp: startTime,
+      method: method,
+      url: fullUrl,
+      host: hostname,
+      path: path,
+      status: mock.status,
+      requestHeaders: reqHeaders,
+      requestBody: body.length > 0 ? body.toString('utf-8') : null,
+      responseHeaders: mock.headers,
+      responseBody: mock.body,
+      contentType: mock.headers['content-type'] || 'text/plain',
+      duration: Date.now() - startTime + (mockRule.delay || 0),
+      size: Buffer.byteLength(mock.body),
+    };
+
+    const requestId = this.storage.saveRequest(capturedRequest);
+    const saved = this.storage.getRequestById(requestId);
+    if (saved) {
+      this.emit('request:complete', saved);
+    }
+
+    // Send mock response to client
+    if (!clientSocket.writable || clientSocket.destroyed) {
+      console.error('[ProxyServer] Client socket is not writable, skipping mock response');
+      return;
+    }
+
+    let responseHead = `HTTP/1.1 ${mock.status} ${http.STATUS_CODES[mock.status] || 'OK'}\r\n`;
+    for (const [key, value] of Object.entries(mock.headers)) {
+      responseHead += `${key}: ${value}\r\n`;
+    }
+    const bodyBuffer = Buffer.from(mock.body);
+    responseHead += `Content-Length: ${bodyBuffer.length}\r\n`;
+    responseHead += '\r\n';
+
+    try {
+      clientSocket.write(responseHead);
+      clientSocket.write(bodyBuffer);
+    } catch (err) {
+      console.error('[ProxyServer] Error writing mock response to HTTPS client:', err);
+    }
+  }
+
+  /**
    * Handle proxy response
    */
   private handleProxyResponse(
@@ -663,5 +831,124 @@ export class ProxyServer extends EventEmitter {
       }
     }
     return result;
+  }
+  
+  /**
+   * Handle WebSocket upgrade requests
+   */
+  private handleWebSocketUpgrade(clientReq: http.IncomingMessage, clientSocket: net.Socket, _head: Buffer): void {
+    const requestUrl = clientReq.url || '';
+    const startTime = Date.now();
+    
+    let parsedUrl: url.URL;
+    try {
+      parsedUrl = new url.URL(requestUrl);
+    } catch {
+      clientSocket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
+      return;
+    }
+    
+    // Save WebSocket connection initiation
+    const requestId = this.storage.saveRequest({
+      method: 'WEBSOCKET',
+      url: requestUrl,
+      host: parsedUrl.hostname,
+      path: parsedUrl.pathname + parsedUrl.search,
+      requestHeaders: this.headersToRecord(clientReq.headers),
+      requestBody: '',
+      timestamp: startTime,
+      status: 0,
+      responseHeaders: {},
+      responseBody: null,
+      contentType: 'websocket',
+      duration: 0,
+      size: 0,
+    });
+    
+    // Establish connection to target WebSocket server
+    const wsOptions: http.RequestOptions = {
+      hostname: parsedUrl.hostname,
+      port: parsedUrl.port || 80,
+      path: parsedUrl.pathname + parsedUrl.search,
+      method: 'GET',
+      headers: { ...clientReq.headers },
+    };
+    
+    const targetRequest = http.request(wsOptions);
+    
+    targetRequest.on('upgrade', (targetRes, targetSocket, targetHead) => {
+      // Forward upgrade response to client
+      clientSocket.write('HTTP/1.1 101 Switching Protocols\r\n');
+      for (const [key, value] of Object.entries(targetRes.headers)) {
+        clientSocket.write(`${key}: ${value}\r\n`);
+      }
+      clientSocket.write('\r\n');
+      clientSocket.write(targetHead);
+      
+      // Update storage with successful upgrade
+      this.storage.updateResponse(requestId, {
+        status: 101,
+        responseHeaders: this.headersToRecord(targetRes.headers),
+        responseBody: '[WebSocket Connection Established]',
+        contentType: 'websocket',
+        duration: Date.now() - startTime,
+        size: 0,
+      });
+      
+      const completeRequest = this.storage.getRequestById(requestId);
+      if (completeRequest) {
+        this.emit('request:complete', completeRequest);
+      }
+      
+      // Track WebSocket frames (optional - can be extensive)
+      let clientToServerFrames = 0;
+      let serverToClientFrames = 0;
+      
+      // Pipe data bidirectionally
+      targetSocket.on('data', (data) => {
+        serverToClientFrames++;
+        clientSocket.write(data);
+      });
+      
+      clientSocket.on('data', (data) => {
+        clientToServerFrames++;
+        targetSocket.write(data);
+      });
+      
+      // Handle closures
+      const cleanup = () => {
+        targetSocket.end();
+        clientSocket.end();
+        console.log(`[WebSocket] Closed ${parsedUrl.hostname} - C→S: ${clientToServerFrames}, S→C: ${serverToClientFrames}`);
+      };
+      
+      targetSocket.on('end', cleanup);
+      targetSocket.on('error', (err) => {
+        console.error('[WebSocket] Target error:', err.message);
+        cleanup();
+      });
+      
+      clientSocket.on('end', cleanup);
+      clientSocket.on('error', (err) => {
+        console.error('[WebSocket] Client error:', err.message);
+        cleanup();
+      });
+    });
+    
+    targetRequest.on('error', (err) => {
+      console.error('[WebSocket] Upgrade error:', err.message);
+      clientSocket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n');
+      
+      this.storage.updateResponse(requestId, {
+        status: 502,
+        responseHeaders: {},
+        responseBody: `WebSocket upgrade failed: ${err.message}`,
+        contentType: 'text/plain',
+        duration: Date.now() - startTime,
+        size: 0,
+      });
+    });
+    
+    targetRequest.end();
   }
 }

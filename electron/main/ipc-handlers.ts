@@ -4,6 +4,9 @@ import type { CertificateManager } from './services/CertificateManager';
 import type { ProxyServer } from './services/ProxyServer';
 import type { TrafficStorage } from './services/TrafficStorage';
 import type { CertServer } from './services/CertServer';
+import type { BreakpointService } from './services/BreakpointService';
+import type { MockService } from './services/MockService';
+import type { RequestComposer } from './services/RequestComposer';
 import type {
   ProxyConfig,
   ProxyStatus,
@@ -12,7 +15,11 @@ import type {
   AppSettings,
   ExportFormat,
   HarLog,
-  HarEntry
+  HarEntry,
+  ComposedRequest,
+  BreakpointConfig,
+  InterceptedRequest,
+  MockRule
 } from '../../shared/types';
 import { IPC_CHANNELS, DEFAULT_SETTINGS } from '../../shared/types';
 import { getLocalIp } from './utils/network';
@@ -22,11 +29,14 @@ interface Services {
   proxyServer: ProxyServer;
   trafficStorage: TrafficStorage;
   certServer: CertServer;
+  breakpointService: BreakpointService;
+  mockService: MockService;
+  requestComposer: RequestComposer;
   mainWindow: () => BrowserWindow | null;
 }
 
 export function setupIpcHandlers(services: Services): void {
-  const { certificateManager, proxyServer, trafficStorage, certServer, mainWindow } = services;
+  const { certificateManager, proxyServer, trafficStorage, certServer, breakpointService, mockService, requestComposer, mainWindow } = services;
 
   // ===== Proxy Control =====
 
@@ -340,6 +350,144 @@ export function setupIpcHandlers(services: Services): void {
       return true;
     } catch (error) {
       console.error('[IPC] Failed to launch emulator:', error);
+      throw error;
+    }
+  });
+
+  // ===== Request Replay & Composer =====
+
+  ipcMain.handle(IPC_CHANNELS.REQUEST_REPLAY, async (_event, id: number): Promise<CapturedRequest> => {
+    try {
+      const originalRequest = trafficStorage.getRequestById(id);
+      if (!originalRequest) {
+        throw new Error(`Request not found: ${id}`);
+      }
+
+      console.log('[IPC] Replaying request:', id);
+      const result = await requestComposer.replayRequest(originalRequest);
+      
+      // Save replayed request to storage
+      const savedId = trafficStorage.saveRequest(result);
+      const saved = trafficStorage.getRequestById(savedId);
+      
+      if (saved) {
+        // Emit to renderer
+        const win = mainWindow();
+        if (win && !win.isDestroyed()) {
+          win.webContents.send(IPC_CHANNELS.REQUEST_CAPTURED, saved);
+        }
+      }
+      
+      return saved || result;
+    } catch (error) {
+      console.error('[IPC] Failed to replay request:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.REQUEST_COMPOSE, async (_event, request: ComposedRequest): Promise<CapturedRequest> => {
+    try {
+      console.log('[IPC] Composing request:', request.method, request.url);
+      const result = await requestComposer.sendRequest(request);
+      
+      // Save composed request to storage
+      const savedId = trafficStorage.saveRequest(result);
+      const saved = trafficStorage.getRequestById(savedId);
+      
+      if (saved) {
+        // Emit to renderer
+        const win = mainWindow();
+        if (win && !win.isDestroyed()) {
+          win.webContents.send(IPC_CHANNELS.REQUEST_CAPTURED, saved);
+        }
+      }
+      
+      return saved || result;
+    } catch (error) {
+      console.error('[IPC] Failed to compose request:', error);
+      throw error;
+    }
+  });
+
+  // ===== Breakpoints =====
+
+  ipcMain.handle(IPC_CHANNELS.BREAKPOINT_SET_CONFIG, async (_event, config: BreakpointConfig): Promise<void> => {
+    try {
+      breakpointService.setConfig(config);
+      console.log('[IPC] Breakpoint config updated:', config);
+    } catch (error) {
+      console.error('[IPC] Failed to set breakpoint config:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.BREAKPOINT_GET_CONFIG, async (): Promise<BreakpointConfig> => {
+    return breakpointService.getConfig();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.BREAKPOINT_CONTINUE, async (_event, id: string, modified?: InterceptedRequest): Promise<void> => {
+    try {
+      breakpointService.continue(id, modified);
+      console.log('[IPC] Breakpoint continued:', id);
+    } catch (error) {
+      console.error('[IPC] Failed to continue breakpoint:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.BREAKPOINT_DROP, async (_event, id: string): Promise<void> => {
+    try {
+      breakpointService.drop(id);
+      console.log('[IPC] Breakpoint dropped:', id);
+    } catch (error) {
+      console.error('[IPC] Failed to drop breakpoint:', error);
+      throw error;
+    }
+  });
+
+  // ===== Mock Rules =====
+
+  ipcMain.handle(IPC_CHANNELS.MOCK_GET_RULES, async (): Promise<MockRule[]> => {
+    return mockService.getRules();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MOCK_ADD_RULE, async (_event, rule: Omit<MockRule, 'id'>): Promise<MockRule> => {
+    try {
+      const newRule = mockService.addRule(rule);
+      console.log('[IPC] Mock rule added:', newRule.name);
+      return newRule;
+    } catch (error) {
+      console.error('[IPC] Failed to add mock rule:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MOCK_UPDATE_RULE, async (_event, id: string, updates: Partial<MockRule>): Promise<void> => {
+    try {
+      mockService.updateRule(id, updates);
+      console.log('[IPC] Mock rule updated:', id);
+    } catch (error) {
+      console.error('[IPC] Failed to update mock rule:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MOCK_DELETE_RULE, async (_event, id: string): Promise<void> => {
+    try {
+      mockService.deleteRule(id);
+      console.log('[IPC] Mock rule deleted:', id);
+    } catch (error) {
+      console.error('[IPC] Failed to delete mock rule:', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MOCK_TOGGLE_RULE, async (_event, id: string, enabled: boolean): Promise<void> => {
+    try {
+      mockService.toggleRule(id, enabled);
+      console.log('[IPC] Mock rule toggled:', id, enabled);
+    } catch (error) {
+      console.error('[IPC] Failed to toggle mock rule:', error);
       throw error;
     }
   });

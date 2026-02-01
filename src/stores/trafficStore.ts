@@ -47,12 +47,60 @@ export const useTrafficStore = defineStore('traffic', () => {
     
     // Search query
     if (filter.value.searchQuery) {
-      const query = filter.value.searchQuery.toLowerCase();
-      result = result.filter(r => 
-        r.url.toLowerCase().includes(query) ||
-        r.host.toLowerCase().includes(query) ||
-        r.path.toLowerCase().includes(query)
-      );
+      const query = filter.value.searchQuery;
+      
+      if (filter.value.useRegex) {
+        try {
+          const regex = new RegExp(query, 'i');
+          result = result.filter(r => {
+            // Search in URL, host, path
+            if (regex.test(r.url) || regex.test(r.host) || regex.test(r.path)) {
+              return true;
+            }
+            
+            // Search in body if enabled
+            if (filter.value.searchInBody) {
+              if (r.requestBody && regex.test(r.requestBody)) return true;
+              if (r.responseBody && regex.test(r.responseBody)) return true;
+            }
+            
+            // Search in headers if enabled
+            if (filter.value.searchInHeaders) {
+              const allHeaders = JSON.stringify(r.requestHeaders) + JSON.stringify(r.responseHeaders);
+              if (regex.test(allHeaders)) return true;
+            }
+            
+            return false;
+          });
+        } catch (e) {
+          // Invalid regex, skip filtering
+          console.warn('Invalid regex:', e);
+        }
+      } else {
+        const lowerQuery = query.toLowerCase();
+        result = result.filter(r => {
+          // Basic text search
+          if (r.url.toLowerCase().includes(lowerQuery) || 
+              r.host.toLowerCase().includes(lowerQuery) || 
+              r.path.toLowerCase().includes(lowerQuery)) {
+            return true;
+          }
+          
+          // Search in body if enabled
+          if (filter.value.searchInBody) {
+            if (r.requestBody && r.requestBody.toLowerCase().includes(lowerQuery)) return true;
+            if (r.responseBody && r.responseBody.toLowerCase().includes(lowerQuery)) return true;
+          }
+          
+          // Search in headers if enabled
+          if (filter.value.searchInHeaders) {
+            const allHeaders = JSON.stringify(r.requestHeaders) + JSON.stringify(r.responseHeaders);
+            if (allHeaders.toLowerCase().includes(lowerQuery)) return true;
+          }
+          
+          return false;
+        });
+      }
     }
     
     // Methods
@@ -61,8 +109,24 @@ export const useTrafficStore = defineStore('traffic', () => {
     }
     
     // Status codes
-    if (filter.value.statusCodes && filter.value.statusCodes.length > 0) {
-      result = result.filter(r => filter.value.statusCodes!.includes(r.status));
+    if (filter.value.statusCodes?.length) {
+			result = result.filter(r => filter.value.statusCodes!.some(code => r.status.toString().startsWith(code[0])));
+		}
+    
+    // Size filtering
+    if (filter.value.minSize !== null && filter.value.minSize !== undefined) {
+      result = result.filter(r => r.size >= filter.value.minSize!);
+    }
+    if (filter.value.maxSize !== null && filter.value.maxSize !== undefined) {
+      result = result.filter(r => r.size <= filter.value.maxSize!);
+    }
+    
+    // Duration filtering
+    if (filter.value.minDuration !== null && filter.value.minDuration !== undefined) {
+      result = result.filter(r => r.duration >= filter.value.minDuration!);
+    }
+    if (filter.value.maxDuration !== null && filter.value.maxDuration !== undefined) {
+      result = result.filter(r => r.duration <= filter.value.maxDuration!);
     }
     
     // Hosts

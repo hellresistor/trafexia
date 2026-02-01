@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue';
 import { useTrafficStore } from '@/stores/trafficStore';
-import { formatTimestamp, formatBytes, formatDuration, getStatusClass, truncateUrl } from '@/utils/formatters';
+import { formatTimestamp, formatBytes, formatDuration, getStatusClass } from '@/utils/formatters';
 import type { CapturedRequest } from '@shared/types';
 import DataTable from 'primevue/datatable';
 import Column from 'primevue/column';

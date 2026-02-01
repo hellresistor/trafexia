@@ -10,7 +10,9 @@ import {
   Trash2,
   Filter,
   X,
-  Download
+  Download,
+  Pencil,
+  ShieldCheck
 } from 'lucide-vue-next';
 import { useToast } from 'primevue/usetoast';
 
@@ -25,6 +27,10 @@ import RequestList from '@/components/RequestList.vue';
 import FilterPanel from '@/components/FilterPanel.vue';
 import RequestDetail from '@/components/RequestDetail.vue';
 import SettingsDialog from '@/components/SettingsDialog.vue';
+import RequestComposer from '@/components/RequestComposer.vue';
+import MockRulesManager from '@/components/MockRulesManager.vue';
+import BreakpointEditor from '@/components/BreakpointEditor.vue';
+import TimelineView from '@/components/TimelineView.vue';
 
 const trafficStore = useTrafficStore();
 const proxyStore = useProxyStore();
@@ -35,6 +41,9 @@ const toast = useToast();
 const showFilters = ref(false);
 const showSettings = ref(false);
 const showQrCode = ref(false);
+const showComposer = ref(false);
+const showMockRules = ref(false);
+const viewMode = ref<'list' | 'timeline'>('list');
 
 // Computed
 const hasSelectedRequest = computed(() => !!trafficStore.selectedRequest);
@@ -156,6 +165,34 @@ function exportPostman() {
           <span class="counter-label">requests</span>
         </div>
 
+        <!-- Request Composer -->
+        <button class="btn btn-ghost btn-icon" @click="showComposer = true" title="Request Composer">
+          <Pencil class="w-5 h-5" />
+        </button>
+
+        <!-- Mock Rules -->
+        <button class="btn btn-ghost btn-icon" @click="showMockRules = true" title="Mock Rules">
+          <ShieldCheck class="w-5 h-5" />
+        </button>
+        
+        <!-- View Mode Toggle -->
+        <div class="view-toggle">
+          <button 
+            :class="['view-toggle-btn', { active: viewMode === 'list' }]"
+            @click="viewMode = 'list'" 
+            title="List View"
+          >
+            <i class="pi pi-list"></i>
+          </button>
+          <button 
+            :class="['view-toggle-btn', { active: viewMode === 'timeline' }]"
+            @click="viewMode = 'timeline'" 
+            title="Timeline View"
+          >
+            <i class="pi pi-chart-bar"></i>
+          </button>
+        </div>
+
         <!-- Filter Toggle -->
         <button class="btn btn-ghost btn-icon" :class="{ 'active': showFilters }" @click="showFilters = !showFilters"
           title="Toggle Filters">
@@ -189,7 +226,7 @@ function exportPostman() {
     <main class="app-content">
       <!-- Filter Sidebar -->
       <aside v-if="showFilters"
-        style="width: 280px; background: #161b22; border-right: 1px solid rgba(48, 54, 61, 0.8); display: flex; flex-direction: column; flex-shrink: 0;">
+        style="width: 400px; background: #161b22; border-right: 1px solid rgba(48, 54, 61, 0.8); display: flex; flex-direction: column; flex-shrink: 0;">
         <div
           style="padding: 12px 16px; border-bottom: 1px solid rgba(48, 54, 61, 0.8); display: flex; align-items: center; justify-content: space-between; font-weight: 600; font-size: 13px; color: #e6edf3;">
           <span>Filters</span>
@@ -204,7 +241,7 @@ function exportPostman() {
 
 
       <!-- Main Content -->
-      <div style="flex: 1; display: flex; overflow: hidden;" ref="mainContainer">
+      <div style="flex: 1; display: flex; overflow: hidden;" ref="mainContainer" v-if="viewMode === 'list'">
         <!-- Request List Panel -->
         <div :style="listPanelStyle">
           <RequestList />
@@ -220,10 +257,24 @@ function exportPostman() {
           <RequestDetail />
         </div>
       </div>
+      
+      <!-- Timeline View -->
+      <div v-else style="flex: 1; overflow: hidden;">
+        <TimelineView />
+      </div>
     </main>
 
     <!-- Settings Dialog -->
     <SettingsDialog v-model:visible="showSettings" />
+
+    <!-- Request Composer Dialog -->
+    <RequestComposer v-if="showComposer" @close="showComposer = false" />
+
+    <!-- Mock Rules Manager Dialog -->
+    <MockRulesManager v-if="showMockRules" @close="showMockRules = false" />
+
+    <!-- Breakpoint Editor -->
+    <BreakpointEditor />
 
     <!-- QR Code Dialog -->
     <Dialog v-model:visible="showQrCode" header="Connect Mobile Device" :modal="true" :style="{ width: '400px' }">
@@ -446,4 +497,38 @@ function exportPostman() {
 .resize-handle:hover {
   background: #58a6ff !important;
 }
+
+.view-toggle {
+  display: flex;
+  gap: 2px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+  padding: 2px;
+  margin-left: 8px;
+}
+
+.view-toggle-btn {
+  padding: 6px 12px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.2s;
+  font-size: 14px;
+}
+
+.view-toggle-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--color-text-primary);
+}
+
+.view-toggle-btn.active {
+  background: var(--color-accent);
+  color: white;
+}
+
 </style>
