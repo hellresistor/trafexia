@@ -53,7 +53,14 @@ export interface RequestDbRow {
 export interface FilterOptions {
   searchQuery?: string;
   methods?: string[];
-  statusCodes?: number[];
+  useRegex?: boolean;
+  searchInBody?: boolean;
+  searchInHeaders?: boolean;
+  minSize?: number | null;
+  maxSize?: number | null;
+  minDuration?: number | null;
+  maxDuration?: number | null;
+  statusCodes?: string[];
   hosts?: string[];
   contentTypes?: string[];
   dateRange?: { start: number; end: number };
@@ -82,6 +89,47 @@ export interface QrCodeData {
 
 // ===== Export Formats =====
 export type ExportFormat = 'har' | 'json' | 'curl' | 'python' | 'postman';
+
+// ===== Request Composer =====
+export interface ComposedRequest {
+  method: string;
+  url: string;
+  headers: Record<string, string>;
+  body?: string;
+}
+
+// ===== Breakpoint Configuration =====
+export interface BreakpointConfig {
+  enabled: boolean;
+  breakOnRequest: boolean;
+  breakOnResponse: boolean;
+  urlPattern?: string; // Regex pattern to match URLs
+}
+
+// ===== Intercepted Request/Response =====
+export interface InterceptedRequest {
+  id: string;
+  type: 'request' | 'response';
+  timestamp: number;
+  method: string;
+  url: string;
+  headers: Record<string, string>;
+  body: string | null;
+  status?: number; // Only for responses
+}
+
+// ===== Mock Rule =====
+export interface MockRule {
+  id: string;
+  enabled: boolean;
+  name: string;
+  urlPattern: string; // Regex pattern
+  method?: string; // Optional method filter
+  responseStatus: number;
+  responseHeaders: Record<string, string>;
+  responseBody: string;
+  delay?: number; // Optional delay in ms
+}
 
 // ===== HAR Types =====
 export interface HarLog {
@@ -161,6 +209,24 @@ export const IPC_CHANNELS = {
   // Browser/Emulator
   LAUNCH_BROWSER: 'app:launch-browser',
   LAUNCH_EMULATOR: 'app:launch-emulator',
+
+  // Request Replay & Composer
+  REQUEST_REPLAY: 'request:replay',
+  REQUEST_COMPOSE: 'request:compose',
+
+  // Breakpoints
+  BREAKPOINT_SET_CONFIG: 'breakpoint:set-config',
+  BREAKPOINT_GET_CONFIG: 'breakpoint:get-config',
+  BREAKPOINT_REQUEST_PENDING: 'breakpoint:request-pending',
+  BREAKPOINT_CONTINUE: 'breakpoint:continue',
+  BREAKPOINT_DROP: 'breakpoint:drop',
+
+  // Mock Rules
+  MOCK_GET_RULES: 'mock:get-rules',
+  MOCK_ADD_RULE: 'mock:add-rule',
+  MOCK_UPDATE_RULE: 'mock:update-rule',
+  MOCK_DELETE_RULE: 'mock:delete-rule',
+  MOCK_TOGGLE_RULE: 'mock:toggle-rule',
 } as const;
 
 // ===== IPC Handler Types =====
@@ -193,9 +259,27 @@ export interface IpcApi {
   launchBrowser: (browser: 'chrome' | 'firefox' | 'edge') => Promise<boolean>;
   launchEmulator: () => Promise<boolean>;
 
+  // Request Replay & Composer
+  replayRequest: (id: number) => Promise<CapturedRequest>;
+  composeRequest: (request: ComposedRequest) => Promise<CapturedRequest>;
+
+  // Breakpoints
+  setBreakpointConfig: (config: BreakpointConfig) => Promise<void>;
+  getBreakpointConfig: () => Promise<BreakpointConfig>;
+  continueBreakpoint: (id: string, modified?: InterceptedRequest) => Promise<void>;
+  dropBreakpoint: (id: string) => Promise<void>;
+
+  // Mock Rules
+  getMockRules: () => Promise<MockRule[]>;
+  addMockRule: (rule: Omit<MockRule, 'id'>) => Promise<MockRule>;
+  updateMockRule: (id: string, rule: Partial<MockRule>) => Promise<void>;
+  deleteMockRule: (id: string) => Promise<void>;
+  toggleMockRule: (id: string, enabled: boolean) => Promise<void>;
+
   // Events
   onRequestCaptured: (callback: (request: CapturedRequest) => void) => () => void;
   onProxyError: (callback: (error: string) => void) => () => void;
+  onBreakpointHit: (callback: (intercepted: InterceptedRequest) => void) => () => void;
 }
 
 // ===== Content Type Categories =====

@@ -4,6 +4,9 @@ import { CertificateManager } from './services/CertificateManager';
 import { ProxyServer } from './services/ProxyServer';
 import { TrafficStorage } from './services/TrafficStorage';
 import { CertServer } from './services/CertServer';
+import { BreakpointService } from './services/BreakpointService';
+import { MockService } from './services/MockService';
+import { RequestComposer } from './services/RequestComposer';
 import { setupIpcHandlers } from './ipc-handlers';
 import { getLocalIp } from './utils/network';
 
@@ -12,6 +15,9 @@ let certificateManager: CertificateManager;
 let proxyServer: ProxyServer;
 let trafficStorage: TrafficStorage;
 let certServer: CertServer;
+let breakpointService: BreakpointService;
+let mockService: MockService;
+let requestComposer: RequestComposer;
 let mainWindow: BrowserWindow | null = null;
 
 // Disable hardware acceleration for better compatibility
@@ -70,8 +76,23 @@ const initializeServices = async () => {
   // Initialize cert server
   certServer = new CertServer(certificateManager, getLocalIp);
 
-  // Initialize proxy server
-  proxyServer = new ProxyServer(certificateManager, trafficStorage);
+  // Initialize new services
+  breakpointService = new BreakpointService();
+  mockService = new MockService(trafficStorage);
+  requestComposer = new RequestComposer();
+
+  // Load mock rules from database
+  await mockService.loadRules();
+
+  // Initialize proxy server with new services
+  proxyServer = new ProxyServer(certificateManager, trafficStorage, breakpointService, mockService);
+
+  // Forward breakpoint events to renderer
+  breakpointService.on('breakpoint:hit', (intercepted) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('breakpoint:request-pending', intercepted);
+    }
+  });
 
   // Setup IPC handlers
   setupIpcHandlers({
@@ -79,6 +100,9 @@ const initializeServices = async () => {
     proxyServer,
     trafficStorage,
     certServer,
+    breakpointService,
+    mockService,
+    requestComposer,
     mainWindow: () => mainWindow,
   });
 

@@ -6,7 +6,11 @@ import type {
   FilterOptions,
   CapturedRequest,
   AppSettings,
-  ExportFormat
+  ExportFormat,
+  ComposedRequest,
+  BreakpointConfig,
+  InterceptedRequest,
+  MockRule
 } from '../../shared/types';
 import { IPC_CHANNELS } from '../../shared/types';
 
@@ -73,6 +77,45 @@ const api: IpcApi = {
     return ipcRenderer.invoke(IPC_CHANNELS.LAUNCH_EMULATOR);
   },
 
+  // Request Replay & Composer
+  replayRequest: (id: number): Promise<CapturedRequest> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.REQUEST_REPLAY, id);
+  },
+  composeRequest: (request: ComposedRequest): Promise<CapturedRequest> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.REQUEST_COMPOSE, request);
+  },
+
+  // Breakpoints
+  setBreakpointConfig: (config: BreakpointConfig): Promise<void> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.BREAKPOINT_SET_CONFIG, config);
+  },
+  getBreakpointConfig: (): Promise<BreakpointConfig> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.BREAKPOINT_GET_CONFIG);
+  },
+  continueBreakpoint: (id: string, modified?: InterceptedRequest): Promise<void> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.BREAKPOINT_CONTINUE, id, modified);
+  },
+  dropBreakpoint: (id: string): Promise<void> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.BREAKPOINT_DROP, id);
+  },
+
+  // Mock Rules
+  getMockRules: (): Promise<MockRule[]> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.MOCK_GET_RULES);
+  },
+  addMockRule: (rule: Omit<MockRule, 'id'>): Promise<MockRule> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.MOCK_ADD_RULE, rule);
+  },
+  updateMockRule: (id: string, rule: Partial<MockRule>): Promise<void> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.MOCK_UPDATE_RULE, id, rule);
+  },
+  deleteMockRule: (id: string): Promise<void> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.MOCK_DELETE_RULE, id);
+  },
+  toggleMockRule: (id: string, enabled: boolean): Promise<void> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.MOCK_TOGGLE_RULE, id, enabled);
+  },
+
   // Events
   onRequestCaptured: (callback: (request: CapturedRequest) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, request: CapturedRequest) => {
@@ -91,6 +134,16 @@ const api: IpcApi = {
     ipcRenderer.on(IPC_CHANNELS.PROXY_ERROR, handler);
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.PROXY_ERROR, handler);
+    };
+  },
+
+  onBreakpointHit: (callback: (intercepted: InterceptedRequest) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, intercepted: InterceptedRequest) => {
+      callback(intercepted);
+    };
+    ipcRenderer.on(IPC_CHANNELS.BREAKPOINT_REQUEST_PENDING, handler);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.BREAKPOINT_REQUEST_PENDING, handler);
     };
   },
 };

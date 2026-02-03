@@ -59,6 +59,24 @@ export class TrafficStorage {
       );
     `);
 
+    // Create mock_rules table
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS mock_rules (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        enabled INTEGER DEFAULT 1,
+        method TEXT,
+        url_pattern TEXT NOT NULL,
+        response_status INTEGER NOT NULL,
+        response_headers TEXT DEFAULT '{}',
+        response_body TEXT DEFAULT '',
+        delay INTEGER DEFAULT 0,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_mock_enabled ON mock_rules(enabled);
+    `);
+
     console.log('[TrafficStorage] Database initialized at:', this.dbPath);
   }
 
@@ -295,6 +313,62 @@ export class TrafficStorage {
   setSetting(key: string, value: string): void {
     if (!this.db) throw new Error('Database not initialized');
     this.db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, value);
+  }
+
+  /**
+   * Save a mock rule to database
+   */
+  saveMockRule(rule: any): void {
+    if (!this.db) throw new Error('Database not initialized');
+    
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO mock_rules (
+        id, name, enabled, method, url_pattern, 
+        response_status, response_headers, response_body, delay, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    stmt.run(
+      rule.id,
+      rule.name,
+      rule.enabled ? 1 : 0,
+      rule.method || null,
+      rule.urlPattern,
+      rule.responseStatus,
+      JSON.stringify(rule.responseHeaders),
+      rule.responseBody,
+      rule.delay || 0,
+      Date.now()
+    );
+  }
+
+  /**
+   * Get all mock rules from database
+   */
+  getMockRules(): any[] {
+    if (!this.db) throw new Error('Database not initialized');
+    
+    const rows = this.db.prepare('SELECT * FROM mock_rules ORDER BY created_at DESC').all() as any[];
+    
+    return rows.map(row => ({
+      id: row.id,
+      name: row.name,
+      enabled: row.enabled === 1,
+      method: row.method || undefined,
+      urlPattern: row.url_pattern,
+      responseStatus: row.response_status,
+      responseHeaders: JSON.parse(row.response_headers),
+      responseBody: row.response_body,
+      delay: row.delay || 0,
+    }));
+  }
+
+  /**
+   * Delete a mock rule from database
+   */
+  deleteMockRule(id: string): void {
+    if (!this.db) throw new Error('Database not initialized');
+    this.db.prepare('DELETE FROM mock_rules WHERE id = ?').run(id);
   }
 
   /**
